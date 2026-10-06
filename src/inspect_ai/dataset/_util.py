@@ -191,19 +191,34 @@ def read_target(obj: Any | None) -> str | list[str]:
 def read_choices(obj: Any | None) -> list[str] | None:
     if not is_none_or_nan(obj):
         if isinstance(obj, list):
-            # drop empty entries the same way as the string branch
-            return [str(choice) for choice in obj if str(choice).strip()]
+            return _drop_trailing_empty_choices([str(choice) for choice in obj])
         elif isinstance(obj, str):
             choices = obj.split(",")
             if len(choices) == 1:
                 choices = obj.split()
-            # drop empty entries so a trailing or doubled comma does not
-            # produce an empty-string choice
-            return [choice.strip() for choice in choices if choice.strip()]
+            return _drop_trailing_empty_choices([choice.strip() for choice in choices])
         else:
             return [str(obj)]
     else:
         return None
+
+
+def _drop_trailing_empty_choices(choices: list[str]) -> list[str]:
+    """Remove trailing blanks without changing surviving answer labels.
+
+    Leading or interior blanks cannot be removed safely: they shift positional
+    targets, and targets may be narrative text rather than answer labels.
+    """
+    end = len(choices)
+    while end > 0 and not choices[end - 1].strip():
+        end -= 1
+    choices = choices[:end]
+    if any(not choice.strip() for choice in choices):
+        raise ValueError(
+            "Choices contain a blank before a later option. Removing it would "
+            "change answer labels; correct the choices and target."
+        )
+    return choices
 
 
 def read_setup(setup: Any | None) -> str | None:

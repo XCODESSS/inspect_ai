@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Dataframe imports now interpret timezone-less timestamps as UTC rather than the machine's local timezone.
+- Dataset loaders now reject leading or interior blank choices rather than silently changing the answers named by positional targets.
 
 ## 0.3.276 (02 October 2026)
 

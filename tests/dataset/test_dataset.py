@@ -639,12 +639,78 @@ def example_path(*paths: str) -> str:
     return os.path.join("examples", "/".join(paths))
 
 
-def test_read_choices_drops_empty_entries() -> None:
-    assert read_choices("Paris,London,") == ["Paris", "London"]
-    assert read_choices("Paris,,London") == ["Paris", "London"]
+def test_read_choices_drops_trailing_empty_entries() -> None:
+    assert read_choices("Paris,London,, ") == ["Paris", "London"]
     assert read_choices("Paris, London") == ["Paris", "London"]
     assert read_choices("Paris London") == ["Paris", "London"]
     assert read_choices(",,") == []
     assert read_choices(None) is None
-    assert read_choices(["Paris", "", "London"]) == ["Paris", "London"]
-    assert read_choices(["Paris", " ", "London"]) == ["Paris", "London"]
+    assert read_choices(["Paris", "London", "", " "]) == ["Paris", "London"]
+    assert read_choices([" Paris ", "London"]) == [" Paris ", "London"]
+    assert read_choices([]) == []
+    assert read_choices(["", " "]) == []
+    assert read_choices(42) == ["42"]
+
+
+@pytest.mark.parametrize(
+    "choices",
+    [
+        ",Paris,Rome",
+        "Paris,,Rome",
+        "Paris, ,Rome,",
+        ["", "Paris", "Rome"],
+        ["Paris", "", "Rome"],
+        ["Paris", " ", "Rome", ""],
+    ],
+)
+def test_read_choices_rejects_label_shifting_blanks(
+    choices: str | list[str],
+) -> None:
+    with pytest.raises(ValueError, match="would change answer labels"):
+        read_choices(choices)
+
+
+@pytest.mark.parametrize("suffix", [".json", ".jsonl", ".csv"])
+@pytest.mark.parametrize("custom_fields", [False, True])
+@pytest.mark.parametrize("trailing_only", [False, True])
+def test_dataset_blank_choices_preserve_answer_labels(
+    tmp_path: Path, suffix: str, custom_fields: bool, trailing_only: bool
+) -> None:
+    choices_field = "options" if custom_fields else "choices"
+    target_field = "answer" if custom_fields else "target"
+    choices = ["Paris", "Rome", ""] if trailing_only else ["", "Paris", "Rome"]
+    target = "A" if trailing_only else "B"
+    record = {
+        "input": "What is the capital of France?",
+        choices_field: ",".join(choices) if suffix == ".csv" else choices,
+        target_field: target,
+    }
+    path = tmp_path / f"questions{suffix}"
+    if suffix == ".csv":
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv_module.DictWriter(stream, fieldnames=list(record))
+            writer.writeheader()
+            writer.writerow(record)
+    else:
+        data = record if suffix == ".jsonl" else [record]
+        path.write_text(json_module.dumps(data), encoding="utf-8")
+
+    fields = FieldSpec(choices=choices_field, target=target_field)
+    if trailing_only:
+        sample = file_dataset(str(path), sample_fields=fields)[0]
+        assert sample.choices == ["Paris", "Rome"]
+        assert sample.target == "A"
+    else:
+        with pytest.raises(ValueError, match="would change answer labels"):
+            file_dataset(str(path), sample_fields=fields)
+
+
+def test_json_dataset_custom_mapper_preserves_blank_choices(tmp_path: Path) -> None:
+    sample = Sample(input="question", choices=["", "Paris", "Rome"], target="B")
+    path = tmp_path / "questions.json"
+    path.write_text(sample.model_dump_json(), encoding="utf-8")
+
+    loaded = json_dataset(str(path), sample_fields=Sample.model_validate)[0]
+
+    assert loaded.choices == sample.choices
+    assert loaded.target == sample.target
