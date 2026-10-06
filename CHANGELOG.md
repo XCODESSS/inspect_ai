@@ -1,3 +1,7 @@
+## Unreleased
+
+- Dataframe imports now interpret timezone-less timestamps as UTC rather than the machine's local timezone.
+
 ## 0.3.276 (02 October 2026)
 
 - LiteLLM Proxy: Gemini tool results that are JSON objects are sent under `content`, as the `google` provider sends them; LiteLLM otherwise passed the object as the function response itself and Vertex rejected documents with `$ref` keys (an OpenAPI spec read with `curl`) with a 400.

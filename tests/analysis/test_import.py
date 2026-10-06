@@ -1,16 +1,16 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, tzinfo
 from pathlib import Path
 
 import pytest
 from pydantic import JsonValue
-from typing_extensions import override
+from typing_extensions import Self, override
 
 from inspect_ai._util.dateutil import iso_now
-from inspect_ai.analysis import Column, EvalColumns
+from inspect_ai.analysis import Column, EvalColumns, SampleColumn, samples_df
 from inspect_ai.analysis._dataframe.evals.columns import EvalColumn
 from inspect_ai.analysis._dataframe.record import _resolve_value, import_record
-from inspect_ai.log._file import read_eval_log
-from inspect_ai.log._log import EvalConfig, EvalDataset, EvalLog, EvalSpec
+from inspect_ai.log._file import read_eval_log, write_eval_log
+from inspect_ai.log._log import EvalConfig, EvalDataset, EvalLog, EvalSample, EvalSpec
 
 
 class TColumn(Column):
@@ -190,6 +190,84 @@ def test_date_time_coercion() -> None:
     assert result["iso_dt"].month == expected_dt.month
     assert result["iso_dt"].day == expected_dt.day
     assert result["iso_dt"].hour == expected_dt.hour
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("2024-01-01T12:00:00", "2024-01-01T12:00:00+00:00"),
+        ("2024-01-01 12:00:00", "2024-01-01T12:00:00+00:00"),
+        ("2024-01-01T12:00:00Z", "2024-01-01T12:00:00+00:00"),
+        ("2024-01-01T17:30:00+05:30", "2024-01-01T12:00:00+00:00"),
+        ("2024-01-01T07:00:00-05:00", "2024-01-01T12:00:00+00:00"),
+        ("2024-01-01T00:30:00+05:30", "2023-12-31T19:00:00+00:00"),
+    ],
+)
+def test_import_datetime_strings_as_utc(text: str, expected: str) -> None:
+    result = import_record(
+        eval_log(),
+        {"timestamp": text},
+        [TColumn("timestamp", path="$.timestamp", type=datetime)],
+    )
+
+    assert result["timestamp"] == datetime.fromisoformat(expected)
+    assert isinstance(result["timestamp"], datetime)
+    assert result["timestamp"].tzinfo == timezone.utc
+
+
+@pytest.mark.parametrize("persisted", [False, True])
+def test_samples_df_timezone_less_metadata_is_utc(
+    tmp_path: Path, persisted: bool
+) -> None:
+    log = eval_log()
+    log.samples = [
+        EvalSample(
+            id=1,
+            epoch=1,
+            input="question",
+            target="",
+            metadata={"timestamp": "2024-01-01T12:00:00"},
+        )
+    ]
+    log.eval.dataset.samples = 1
+    source: EvalLog | str = log
+    if persisted:
+        source = str(tmp_path / "timestamp.eval")
+        write_eval_log(log, source)
+
+    frame = samples_df(
+        source,
+        columns=[SampleColumn("timestamp", path="metadata.timestamp", type=datetime)],
+        quiet=True,
+    )
+
+    assert frame["timestamp"].iloc[0] == datetime(2024, 1, 1, 12, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("text", ["not a date", "2024-02-30T12:00:00"])
+def test_datetime_coercion_rejects_invalid_strings(text: str) -> None:
+    with pytest.raises(ValueError, match="Cannot coerce"):
+        _resolve_value(text, datetime)
+
+
+def test_datetime_coercion_does_not_convert_naive_datetime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UtcOnlyDatetime(datetime):
+        @override
+        def astimezone(self, tz: tzinfo | None = None) -> Self:
+            assert self.tzinfo is not None, "Naive conversion consults local timezone"
+            return super().astimezone(tz)
+
+    # Catch host-timezone conversion even when the test runner itself uses UTC.
+    parsed = UtcOnlyDatetime(2024, 1, 1, 12)
+    monkeypatch.setattr(
+        "inspect_ai.analysis._dataframe.record.yaml.safe_load", lambda _: parsed
+    )
+
+    assert _resolve_value("2024-01-01T12:00:00", datetime) == datetime(
+        2024, 1, 1, 12, tzinfo=timezone.utc
+    )
 
 
 def test_yaml_string_coercion() -> None:
