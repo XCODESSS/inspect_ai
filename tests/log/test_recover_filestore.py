@@ -1540,13 +1540,7 @@ async def test_streaming_recovery_marks_summary_completed(
 
 
 async def test_streaming_recovery_carries_sample_init_fields() -> None:
-    """Per-sample files/setup propagate from SampleInitEvent.
-
-    Note: sandbox propagation from SampleInitEvent through JSON round-trip
-    is broken by a pre-existing ``Sample.__init__`` issue (dict form of
-    sandbox resolves to None). Recovery still populates ``sandbox`` from
-    the eval-level spec -- see ``test_streaming_recovery_inherits_eval_sandbox``.
-    """
+    """Per-sample sandbox, files and setup propagate from SampleInitEvent."""
     async with AsyncFilesystem():
         with tempfile.TemporaryDirectory() as temp_dir:
             eval_path = os.path.join(temp_dir, "test.eval")
@@ -1559,6 +1553,7 @@ async def test_streaming_recovery_carries_sample_init_fields() -> None:
                     target="hi",
                     files={"a.txt": "contents"},
                     setup="echo hi",
+                    sandbox=("docker", "sample-compose.yaml"),
                 )
             )
             model_event = _make_model_event_dict("response")
@@ -1593,6 +1588,7 @@ async def test_streaming_recovery_carries_sample_init_fields() -> None:
 
             assert raw["files"] == ["a.txt"]
             assert raw["setup"] == "echo hi"
+            assert raw["sandbox"] == {"type": "docker", "config": "sample-compose.yaml"}
 
 
 async def test_streaming_recovery_inherits_eval_sandbox() -> None:

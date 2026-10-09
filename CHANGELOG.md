@@ -2,6 +2,7 @@
 
 - Dataframe imports now interpret timezone-less timestamps as UTC rather than the machine's local timezone.
 - Dataset loaders now reject leading or interior blank choices rather than silently changing the answers named by positional targets.
+- Unsupported sandbox types, including serialized Sample sandbox dictionaries, now raise an error instead of silently dropping settings or falling back to another environment.
 
 ## 0.3.276 (02 October 2026)
 

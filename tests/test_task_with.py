@@ -1,3 +1,6 @@
+from typing import Any
+
+import pytest
 from test_helpers.tasks import minimal_task
 
 from inspect_ai import task_with
@@ -5,6 +8,68 @@ from inspect_ai._eval.task.task import Task
 from inspect_ai.agent import Agent, AgentState, agent
 from inspect_ai.approval._policy import ApprovalPolicyConfig, ApproverPolicyConfig
 from inspect_ai.log import HeadlineMetric
+from inspect_ai.util import SandboxEnvironmentSpec, SandboxEnvironmentType
+
+
+@pytest.mark.parametrize("override", [False, True], ids=["Task", "task_with"])
+@pytest.mark.parametrize(
+    "sandbox",
+    [
+        [],
+        ["docker", "compose.yaml"],
+        {},
+        {"type": "docker", "config": "compose.yaml"},
+        0,
+        False,
+        object(),
+    ],
+)
+def test_task_rejects_unsupported_sandbox(sandbox: Any, override: bool) -> None:
+    task = Task(sandbox="local")
+
+    with pytest.raises(TypeError, match="Invalid sandbox type"):
+        if override:
+            task_with(task, sandbox=sandbox)
+        else:
+            Task(sandbox=sandbox)
+
+    assert task.sandbox == SandboxEnvironmentSpec("local")
+
+
+@pytest.mark.parametrize("override", [False, True], ids=["Task", "task_with"])
+@pytest.mark.parametrize(
+    ("sandbox", "expected"),
+    [
+        (None, None),
+        ("docker", SandboxEnvironmentSpec("docker")),
+        (
+            ("docker", "compose.yaml"),
+            SandboxEnvironmentSpec("docker", "compose.yaml"),
+        ),
+        (
+            SandboxEnvironmentSpec("docker", "compose.yaml"),
+            SandboxEnvironmentSpec("docker", "compose.yaml"),
+        ),
+    ],
+)
+def test_task_supported_sandbox(
+    sandbox: SandboxEnvironmentType | None,
+    expected: SandboxEnvironmentSpec | None,
+    override: bool,
+) -> None:
+    if override:
+        original = Task(sandbox="local")
+        task = task_with(original, sandbox=sandbox)
+        assert task is original
+    else:
+        task = Task(sandbox=sandbox)
+
+    assert task.sandbox == expected
+
+
+def test_task_with_keeps_sandbox_without_override() -> None:
+    task = Task(sandbox="local")
+    assert task_with(task).sandbox == SandboxEnvironmentSpec("local")
 
 
 def test_task_with_add_options():

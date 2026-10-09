@@ -3,6 +3,7 @@ import math
 import os
 import re
 import tempfile
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO, Literal, cast
@@ -11,7 +12,7 @@ from zipfile import ZipFile
 
 import anyio
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from pydantic_core import PydanticSerializationError
 from test_helpers.utils import skip_if_trio
 from typing_extensions import override
@@ -62,6 +63,7 @@ from inspect_ai.solver import (
     generate,
     solver,
 )
+from inspect_ai.util import ComposeConfig, ComposeService, SandboxEnvironmentSpec
 
 
 def log_path(file: str) -> str:
@@ -289,6 +291,61 @@ def test_can_round_trip_serialize_sample_init_event_with_none_state():
     deserialized = SampleInitEvent.model_validate_json(serialized)
 
     assert original == deserialized
+
+
+@pytest.mark.parametrize("serialization", ["python", "json"])
+@pytest.mark.parametrize(
+    "config",
+    [
+        None,
+        "compose.yaml",
+        ComposeConfig(services={"default": ComposeService(image="ubuntu")}),
+    ],
+)
+def test_sample_init_event_preserves_sandbox(
+    serialization: str, config: BaseModel | str | None
+) -> None:
+    original = SampleInitEvent(
+        sample=Sample(input="input", sandbox=SandboxEnvironmentSpec("docker", config)),
+        timestamp=datetime.now(timezone.utc),
+    )
+    if serialization == "json":
+        restored = SampleInitEvent.model_validate_json(
+            original.model_dump_json(exclude_none=True)
+        )
+    else:
+        data = original.model_dump(exclude_none=True)
+        before = deepcopy(data)
+        restored = SampleInitEvent.model_validate(data)
+        assert data == before
+    assert restored == original
+
+
+def test_sample_init_event_rejects_invalid_sandbox_spec() -> None:
+    with pytest.raises(ValidationError):
+        SampleInitEvent.model_validate(
+            {"sample": {"input": "input", "sandbox": {"type": 42}}}
+        )
+
+
+@pytest.mark.parametrize("format", ["json", "eval"])
+def test_log_round_trip_preserves_sample_init_sandbox(
+    format: str, tmp_path: Path
+) -> None:
+    log = read_eval_log("tests/log/test_eval_log/log_formats.json")
+    assert log.samples
+    sandbox = SandboxEnvironmentSpec("docker", "sample-compose.yaml")
+    log.samples[0].events = [
+        SampleInitEvent(sample=Sample(input="input", sandbox=sandbox))
+    ]
+    path = tmp_path / f"sandbox.{format}"
+    write_eval_log(log, str(path))
+
+    restored = read_eval_log(str(path))
+    assert restored.samples
+    event = restored.samples[0].events[0]
+    assert isinstance(event, SampleInitEvent)
+    assert event.sample.sandbox == sandbox
 
 
 def test_can_round_trip_serialize_sandbox_event():

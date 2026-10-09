@@ -441,6 +441,24 @@ def test_eval_approval_override():
     assert log.eval.config.approval == eval_approval
 
 
+@pytest.mark.parametrize("task_sandbox", [None, "local"])
+@pytest.mark.parametrize(
+    "sandbox",
+    [
+        ["docker", "compose.yaml"],
+        {"type": "docker", "config": "compose.yaml"},
+        False,
+    ],
+)
+def test_eval_rejects_unsupported_sandbox_override(
+    sandbox: Any, task_sandbox: str | None, tmp_path: Path
+) -> None:
+    task = Task(dataset=[Sample(input="x")], sandbox=task_sandbox)
+
+    with pytest.raises(TypeError, match="Invalid sandbox type"):
+        eval(task, model="mockllm/model", sandbox=sandbox, log_dir=str(tmp_path))
+
+
 def test_eval_sandbox_init_when_first_task_has_no_sandbox():
     """Check that Sandbox initialization runs when ANY task has a sandbox, not just the first.
 

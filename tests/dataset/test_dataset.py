@@ -3,7 +3,7 @@ import inspect
 import json as json_module
 import os
 from pathlib import Path
-from typing import Type, TypeVar
+from typing import Any, Type, TypeVar
 from unittest.mock import Mock
 
 import pytest
@@ -23,6 +23,7 @@ from inspect_ai.dataset import (
 )
 from inspect_ai.dataset._util import read_choices
 from inspect_ai.model._chat_message import ChatMessageUser
+from inspect_ai.util import SandboxEnvironmentSpec, SandboxEnvironmentType
 
 T_ds = TypeVar("T_ds")
 
@@ -133,6 +134,117 @@ def test_file_dataset_has_no_delimiter_parameter() -> None:
     # custom delimiters belong to csv_dataset(); file_dataset() only
     # defaults by extension
     assert "delimiter" not in inspect.signature(file_dataset).parameters
+
+
+@pytest.mark.parametrize(
+    "sandbox",
+    [
+        [],
+        ["docker", "compose.yaml"],
+        {},
+        {"type": "docker", "config": "compose.yaml"},
+        0,
+        False,
+        object(),
+    ],
+)
+def test_sample_rejects_unsupported_sandbox(sandbox: Any) -> None:
+    with pytest.raises(TypeError, match="Invalid sandbox type"):
+        Sample(input="x", sandbox=sandbox)
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "expected"),
+    [
+        (None, None),
+        ("docker", SandboxEnvironmentSpec("docker")),
+        (
+            ("docker", "compose.yaml"),
+            SandboxEnvironmentSpec("docker", "compose.yaml"),
+        ),
+        (
+            SandboxEnvironmentSpec("docker", "compose.yaml"),
+            SandboxEnvironmentSpec("docker", "compose.yaml"),
+        ),
+    ],
+)
+def test_sample_supported_sandbox(
+    sandbox: SandboxEnvironmentType | None,
+    expected: SandboxEnvironmentSpec | None,
+) -> None:
+    assert Sample(input="x", sandbox=sandbox).sandbox == expected
+
+
+@pytest.mark.parametrize("serialization", ["python", "json"])
+@pytest.mark.parametrize("config", [None, "compose.yaml"])
+def test_sample_rejects_serialized_sandbox(
+    serialization: str, config: str | None
+) -> None:
+    sample = Sample(input="x", sandbox=SandboxEnvironmentSpec("docker", config))
+
+    with pytest.raises(TypeError, match="Invalid sandbox type: dict"):
+        if serialization == "python":
+            Sample.model_validate(sample.model_dump())
+        else:
+            Sample.model_validate_json(sample.model_dump_json())
+
+
+@pytest.mark.parametrize("serialization", ["python", "json"])
+def test_sample_serialized_without_sandbox(serialization: str) -> None:
+    sample = Sample(input="x")
+
+    if serialization == "python":
+        loaded = Sample.model_validate(sample.model_dump())
+    else:
+        loaded = Sample.model_validate_json(sample.model_dump_json())
+
+    assert loaded == sample
+    assert loaded.sandbox is None
+
+
+def test_json_dataset_mapper_rejects_serialized_sandbox(tmp_path: Path) -> None:
+    sample = Sample(input="x", sandbox=("docker", "compose.yaml"))
+    path = tmp_path / "samples.jsonl"
+    path.write_text(sample.model_dump_json() + "\n", encoding="utf-8")
+
+    with pytest.raises(TypeError, match="Invalid sandbox type: dict"):
+        json_dataset(str(path), sample_fields=Sample.model_validate)
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "expected"),
+    [
+        ("docker", SandboxEnvironmentSpec("docker")),
+        (
+            ["docker", "compose.yaml"],
+            SandboxEnvironmentSpec("docker", "compose.yaml"),
+        ),
+    ],
+)
+def test_json_dataset_supported_sandbox(
+    sandbox: Any, expected: SandboxEnvironmentSpec, tmp_path: Path
+) -> None:
+    path = tmp_path / "samples.jsonl"
+    path.write_text(
+        json_module.dumps({"input": "x", "sandbox": sandbox}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert json_dataset(str(path))[0].sandbox == expected
+
+
+def test_json_dataset_rejects_sandbox_dict(tmp_path: Path) -> None:
+    path = tmp_path / "samples.jsonl"
+    path.write_text(
+        json_module.dumps(
+            {"input": "x", "sandbox": {"type": "docker", "config": "compose.yaml"}}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Unexpected type for 'sandbox' field"):
+        json_dataset(str(path))
 
 
 # test reading a dataset using default configuration

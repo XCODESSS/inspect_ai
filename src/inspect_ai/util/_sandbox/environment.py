@@ -661,15 +661,25 @@ A tuple, e.g. ("docker", "compose.yaml"), is equivalent to SandboxEnvironmentSpe
 def resolve_sandbox_environment(
     sandbox: SandboxEnvironmentType | None,
 ) -> SandboxEnvironmentSpec | None:
-    # do the resolution
+    """Resolve a sandbox specification or shorthand.
+
+    Raises:
+        TypeError: If sandbox has an unsupported type.
+    """
     if isinstance(sandbox, str):
         return SandboxEnvironmentSpec(type=sandbox)
     elif isinstance(sandbox, SandboxEnvironmentSpec):
         return sandbox
     elif isinstance(sandbox, tuple):
         return SandboxEnvironmentSpec(sandbox[0], sandbox[1])
-    else:
+    elif sandbox is None:
         return None
+    else:
+        raise TypeError(
+            f"Invalid sandbox type: {type(sandbox).__name__}. "
+            "Expected a string, a (type, config) tuple, "
+            "a SandboxEnvironmentSpec, or None."
+        )
 
 
 def deserialize_sandbox_specific_config(
