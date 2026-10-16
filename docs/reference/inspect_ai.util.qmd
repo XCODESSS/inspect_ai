@@ -65,6 +65,8 @@ description: Miscellaneous utility functions.
 ### sandbox_default
 ### SandboxEnvironment
 ### SandboxConnection
+### SandboxTimeoutError
+### SandboxCommandTimeoutError
 ### SandboxUnavailableError
 ### SandboxUserUnsupportedError
 ### sandboxenv
